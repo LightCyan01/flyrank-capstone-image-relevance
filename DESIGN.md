@@ -51,6 +51,6 @@ HTTP validation -> service operations -> SQLite
 
 FastAPI will handle authentication and input validation. Service functions will handle ingestion and matching; the store will own SQL transactions. One worker will run model calls outside HTTP requests, retry transient failures and resume interrupted work.
 
-Phase 2 adds image upload, batch processing, progress, metadata, costs and alerts. Phase 3 adds posts, embeddings, ranking and forced-candidate guard checks. Phase 4 adds the submit/check/review workflow in Swagger, the labeled evaluation and final documentation. No frontend is planned.
+Phase 2 adds `POST /images`, `POST /jobs`, `GET /jobs/{id}`, `GET /images/{id}`, `/costs` and `/alerts`. Phase 3 adds posts, embeddings and `GET /posts/{id}/images`, with a forced-candidate endpoint for checking the guard. Phase 4 adds the submit/check/review workflow in Swagger, the labeled evaluation and final documentation. No frontend is planned.
 
-The reviewed README stays in the completed project until Phase 4. This repository will use ordinary Python `#` comments only where the reason for a decision needs explaining.
+Prepare and verify the Phase 1 corpus with `uv run python -m image_relevance.corpus`, then `uv run python tests/check_design.py`. Photos download into the ignored `data/corpus/` folder; source credits, licenses and checksums are in `corpus/images.json`.
