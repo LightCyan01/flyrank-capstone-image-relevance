@@ -82,7 +82,12 @@ def create_app(settings: Settings | None = None, *, models=None) -> FastAPI:
     def batch(
         files: Annotated[
             list[UploadFile],
-            File(min_length=1, max_length=200, description="JPEG, PNG or WebP photos"),
+            File(
+                min_length=1,
+                max_length=200,
+                description="JPEG, PNG or WebP photos",
+                json_schema_extra={"items": {"type": "string", "format": "binary"}},
+            ),
         ],
         tenant: Annotated[str, Depends(authenticate)],
     ):
@@ -136,7 +141,7 @@ def create_app(settings: Settings | None = None, *, models=None) -> FastAPI:
 
     @app.post("/images", status_code=201, tags=["Advanced"])
     def add_image(
-        file: UploadFile,
+        file: Annotated[UploadFile, File(json_schema_extra={"format": "binary"})],
         tenant: Annotated[str, Depends(authenticate)],
     ):
         return service.add_image(

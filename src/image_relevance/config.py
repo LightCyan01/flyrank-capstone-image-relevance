@@ -3,7 +3,6 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
-
 def load_env(path: Path = Path(".env")) -> None:
     if path.is_file():
         for line in path.read_text(encoding="utf-8").splitlines():
@@ -13,7 +12,6 @@ def load_env(path: Path = Path(".env")) -> None:
                 if not separator or not key.replace("_", "").isalnum():
                     raise ValueError("Invalid .env entry")
                 os.environ.setdefault(key, value.strip().strip("\"'"))
-
 
 @dataclass(frozen=True)
 class Settings:

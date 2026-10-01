@@ -15,10 +15,8 @@ from image_relevance.worker import Worker
 
 MANIFEST = Path(__file__).resolve().parents[2] / "corpus" / "images.json"
 
-
 def load_images() -> list[dict]:
     return json.loads(MANIFEST.read_text(encoding="utf-8"))
-
 
 def verify_image(raw: bytes, entry: dict) -> None:
     if not raw or len(raw) > MAX_IMAGE_BYTES:

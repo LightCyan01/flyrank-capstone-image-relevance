@@ -25,7 +25,7 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=8000)
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
-    # Libraries emit their own progress; suppress request logs that may contain signed URLs.
+    # Libraries emit their own progress. Suppress request logs that may contain signed URLs.
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("httpcore").setLevel(logging.WARNING)
     init()

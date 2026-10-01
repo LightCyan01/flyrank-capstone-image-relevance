@@ -1,6 +1,5 @@
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-
 class Metadata(BaseModel):
     model_config = ConfigDict(
         extra="forbid", strict=True, str_strip_whitespace=True, revalidate_instances="always"
@@ -22,7 +21,6 @@ class Metadata(BaseModel):
                 raise ValueError("Attributes must contain 1 to 100 characters")
             cleaned.append(value)
         return cleaned
-
 
 class BatchInput(BaseModel):
     model_config = ConfigDict(extra="forbid")

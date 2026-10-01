@@ -14,7 +14,6 @@ from image_relevance.schemas import Metadata
 MAX_IMAGE_BYTES = 10 * 1024 * 1024
 MAX_IMAGE_PIXELS = 25_000_000
 
-
 def read_image(raw: bytes) -> Image.Image:
     if not raw or len(raw) > MAX_IMAGE_BYTES:
         raise ValueError("Image must contain 1 byte to 10 MiB")
@@ -82,8 +81,7 @@ class Models:
             raise ValueError("Classification model returned no probabilities")
         label = result.names[result.probs.top1].replace("_", " ")
         detected = re.search(r"\b(fox|wolf|dog|bear|deer|elk|grizzly)\b", label) is not None
-        # ImageNet dog breed names usually do not contain the word 'dog'.
-        # Its documented dog class range is 151..268; use it only for official weights.
+        # ImageNet dog breed names do not contain the word 'dog'.
         imagenet_labels = (
             len(result.names) == 1000 and result.names.get(151, "").lower() == "chihuahua"
         )
@@ -124,7 +122,7 @@ class Models:
             ).to(self.settings.device)
         output = model.generate(**inputs, max_new_tokens=30, do_sample=False)
         caption = processor.decode(output[0], skip_special_tokens=True)
-        # Keep only details the caption model actually named; these are not species defaults.
+        # Keep only details the caption model actually named
         details = (
             "red",
             "orange",
