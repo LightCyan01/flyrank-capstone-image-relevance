@@ -16,6 +16,9 @@ dependencies = [
     "filelock>=3.20,<4",
 ]
 
+[project.scripts]
+image-relevance = "image_relevance.cli:main"
+
 [dependency-groups]
 dev = ["httpx>=0.28,<1", "ruff>=0.11,<1"]
 
