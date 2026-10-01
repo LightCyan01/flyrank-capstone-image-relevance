@@ -2,7 +2,9 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class Metadata(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True, str_strip_whitespace=True)
+    model_config = ConfigDict(
+        extra="forbid", strict=True, str_strip_whitespace=True, revalidate_instances="always"
+    )
 
     subject: str = Field(min_length=1, max_length=100)
     category: str = Field(min_length=1, max_length=50)

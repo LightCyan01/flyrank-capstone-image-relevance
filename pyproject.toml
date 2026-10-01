@@ -3,7 +3,14 @@ name = "flyrank-capstone-image-relevance"
 version = "0.1.0"
 description = "Local YOLO image understanding and article matching"
 requires-python = ">=3.12,<3.13"
-dependencies = ["pydantic>=2.12,<3", "pillow>=11,<13"]
+dependencies = [
+    "pydantic>=2.12,<3",
+    "pillow>=11,<13",
+    "ultralytics>=8.4.21,<9",
+    "transformers>=5.2,<6",
+    "torch>=2.7,<3",
+    "torchvision>=0.22,<1",
+]
 
 [dependency-groups]
 dev = ["ruff>=0.11,<1"]
@@ -14,6 +21,15 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.package-data]
 image_relevance = ["migrations/*.sql"]
+
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }
+torchvision = { index = "pytorch-cpu" }
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
 
 [tool.ruff]
 line-length = 100
