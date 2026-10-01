@@ -4,6 +4,9 @@ version = "0.1.0"
 description = "Local YOLO image understanding and article matching"
 requires-python = ">=3.12,<3.13"
 dependencies = [
+    "fastapi>=0.115,<1",
+    "uvicorn>=0.34,<1",
+    "python-multipart>=0.0.20,<1",
     "pydantic>=2.12,<3",
     "pillow>=11,<13",
     "ultralytics>=8.4.21,<9",
@@ -14,7 +17,7 @@ dependencies = [
 ]
 
 [dependency-groups]
-dev = ["ruff>=0.11,<1"]
+dev = ["httpx>=0.28,<1", "ruff>=0.11,<1"]
 
 [build-system]
 requires = ["setuptools>=80"]

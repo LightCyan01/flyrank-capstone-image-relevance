@@ -107,8 +107,10 @@ class Service:
     def job(self, tenant: str, job_id: str) -> dict:
         row = self.store.get("jobs", tenant, job_id)
         items = self.store.rows(
-            "SELECT image_id,status,attempts,error FROM job_items WHERE tenant_id=? "
-            "AND job_id=? ORDER BY id",
+            "SELECT item.image_id,image.filename,item.status,item.attempts,item.error "
+            "FROM job_items AS item JOIN images AS image ON image.id=item.image_id "
+            "AND image.tenant_id=item.tenant_id WHERE item.tenant_id=? "
+            "AND item.job_id=? ORDER BY item.id",
             (tenant, job_id),
         )
         return {
@@ -118,4 +120,29 @@ class Service:
             "completed": sum(item["status"] == "done" for item in items),
             "failed": sum(item["status"] == "failed" for item in items),
             "items": items,
+        }
+
+    def start_batch(self, tenant: str, image_ids: list[str]) -> dict:
+        batch = BatchInput(image_ids=sorted(set(image_ids)))
+        version = [batch.image_ids, self.settings.vision_model, self.settings.caption_model]
+        request_key = digest(json.dumps(version).encode())
+        return self.enqueue(tenant, request_key, batch, retry_failed=True)
+
+    def costs(self, tenant: str, limit: int = 100, offset: int = 0) -> dict:
+        calls = self.store.rows(
+            "SELECT call.*,item.image_id FROM model_calls AS call "
+            "JOIN job_items AS item ON item.id=call.item_id "
+            "WHERE call.tenant_id=? ORDER BY call.id LIMIT ? OFFSET ?",
+            (tenant, limit, offset),
+        )
+        totals = self.store.rows(
+            "SELECT COUNT(*) AS calls,COALESCE(SUM(cost_usd),0) AS cost_usd "
+            "FROM model_calls WHERE tenant_id=?",
+            (tenant,),
+        )[0]
+        return {
+            "provider": "local",
+            "totals": totals,
+            "calls": calls,
+            "daily_call_limit": self.settings.daily_call_limit,
         }
