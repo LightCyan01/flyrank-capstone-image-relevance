@@ -33,16 +33,17 @@ class PostInput(BaseModel):
 
 class BatchInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    image_ids: list[str] = Field(min_length=1, max_length=200)
+    image_ids: list[str] = Field(default_factory=list, max_length=200)
+    post_ids: list[str] = Field(default_factory=list, max_length=200)
 
-    @field_validator("image_ids")
+    @field_validator("image_ids", "post_ids")
     @classmethod
     def valid_ids(cls, values: list[str]) -> list[str]:
         if len(values) != len(set(values)):
-            raise ValueError("Image IDs must be unique")
+            raise ValueError("Resource IDs must be unique")
         for value in values:
             if len(value) != 32 or any(c not in "0123456789abcdef" for c in value):
-                raise ValueError("Invalid image ID")
+                raise ValueError("Invalid resource ID")
         return values
 
 

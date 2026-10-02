@@ -1,13 +1,15 @@
+import json
 import logging
 import threading
 import time
 from pathlib import Path
+from typing import Any
 
 from filelock import FileLock
 
 from image_relevance.config import Settings
 from image_relevance.models import Models
-from image_relevance.schemas import Metadata
+from image_relevance.schemas import Metadata, valid_vector
 from image_relevance.store import Store
 
 logger = logging.getLogger(__name__)
@@ -70,14 +72,16 @@ class Worker:
                 (item["id"],),
             )
             db.execute("UPDATE jobs SET status='running' WHERE id=?", (item["job_id"],))
+            table = "images" if item["image_id"] else "posts"
+            resource_id = item["image_id"] or item["post_id"]
             db.execute(
-                "UPDATE images SET status='processing' WHERE tenant_id=? AND id=?",
-                (item["tenant_id"], item["image_id"]),
+                f"UPDATE {table} SET status='processing' WHERE tenant_id=? AND id=?",
+                (item["tenant_id"], resource_id),
             )
             item["attempts"] += 1
             return item
 
-    def call(self, item: dict, kind: str, model: str, operation, *args) -> Metadata:
+    def call(self, item: dict, kind: str, model: str, operation, *args) -> Any:
         with self.store.connect() as db:
             db.execute("BEGIN IMMEDIATE")
             count = db.execute(
@@ -101,7 +105,8 @@ class Worker:
         started = time.perf_counter()
         status, message = "succeeded", None
         try:
-            return Metadata.model_validate(operation(*args))
+            result = operation(*args)
+            return valid_vector(result) if kind == "embedding" else Metadata.model_validate(result)
         except Exception as error:
             # Model errors may contain signed URLs or secrets; record only their class.
             status, message = "failed", type(error).__name__
@@ -113,42 +118,32 @@ class Worker:
                     (status, (time.perf_counter() - started) * 1000, message, call_id),
                 )
 
-    def process(self, item: dict) -> None:
+    def describe_image(self, item: dict, row: dict) -> Metadata:
         tenant, image_id = item["tenant_id"], item["image_id"]
-        row = self.store.get("images", tenant, image_id)
         if (
             row["metadata"]
             and row["vision_model"] == self.settings.vision_model
             and row["caption_model"] == self.settings.caption_model
         ):
-            metadata = Metadata.model_validate_json(row["metadata"])
-        else:
-            path = Path(row["path"])
-            classification = self.call(
-                item, "classification", self.settings.vision_model, self.models.classify, path
-            )
-            metadata = self.call(
-                item,
-                "caption",
-                self.settings.caption_model,
-                self.models.describe,
-                path,
-                classification,
-            )
-        status = "ready"
-        if metadata.confidence < self.settings.min_confidence or metadata.category != "animal":
-            status = "needs_review"
+            return Metadata.model_validate_json(row["metadata"])
+        path = Path(row["path"])
+        classification = self.call(
+            item, "classification", self.settings.vision_model, self.models.classify, path
+        )
+        metadata = self.call(
+            item, "caption", self.settings.caption_model, self.models.describe, path, classification
+        )
         tags = [("subject", metadata.subject), ("category", metadata.category)]
         tags += [("attribute", value) for value in metadata.attributes]
         with self.store.connect() as db:
             db.execute(
-                "UPDATE images SET metadata=?,vision_model=?,caption_model=?,status=? "
+                "UPDATE images SET metadata=?,vision_model=?,caption_model=?,"
+                "vector=NULL,embedding_model=NULL "
                 "WHERE tenant_id=? AND id=?",
                 (
                     metadata.model_dump_json(),
                     self.settings.vision_model,
                     self.settings.caption_model,
-                    status,
                     tenant,
                     image_id,
                 ),
@@ -157,6 +152,36 @@ class Worker:
             db.executemany(
                 "INSERT OR IGNORE INTO tags VALUES(?,?,?,?)",
                 [(tenant, image_id, kind, value) for kind, value in tags],
+            )
+        row["vector"] = None
+        return metadata
+
+    def process(self, item: dict) -> None:
+        tenant = item["tenant_id"]
+        table = "images" if item["image_id"] else "posts"
+        resource_id = item["image_id"] or item["post_id"]
+        row = self.store.get(table, tenant, resource_id)
+        status = "ready"
+        if item["image_id"]:
+            metadata = self.describe_image(item, row)
+            text = metadata.caption
+            if metadata.confidence < self.settings.min_confidence or metadata.category != "animal":
+                status = "needs_review"
+        else:
+            text = row["title"] + "\n" + row["content"]
+        if not row["vector"] or row["embedding_model"] != self.settings.embedding_model:
+            vector = self.call(
+                item, "embedding", self.settings.embedding_model, self.models.embed, text
+            )
+            with self.store.connect() as db:
+                db.execute(
+                    f"UPDATE {table} SET vector=?,embedding_model=? WHERE tenant_id=? AND id=?",
+                    (json.dumps(vector), self.settings.embedding_model, tenant, resource_id),
+                )
+        with self.store.connect() as db:
+            db.execute(
+                f"UPDATE {table} SET status=? WHERE tenant_id=? AND id=?",
+                (status, tenant, resource_id),
             )
 
     def finish(self, item: dict, error: Exception | None = None) -> None:
@@ -179,9 +204,10 @@ class Worker:
                 ),
             )
             if status == "failed":
+                table = "images" if item["image_id"] else "posts"
                 db.execute(
-                    "UPDATE images SET status='failed' WHERE tenant_id=? AND id=?",
-                    (item["tenant_id"], item["image_id"]),
+                    f"UPDATE {table} SET status='failed' WHERE tenant_id=? AND id=?",
+                    (item["tenant_id"], item["image_id"] or item["post_id"]),
                 )
                 db.execute(
                     "INSERT OR IGNORE INTO alerts(tenant_id,job_id,item_id,message) "

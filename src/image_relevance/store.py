@@ -2,6 +2,7 @@ import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
 
+
 class Store:
     def __init__(self, data_dir: Path):
         data_dir.mkdir(parents=True, exist_ok=True)
