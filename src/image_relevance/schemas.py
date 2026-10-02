@@ -1,4 +1,7 @@
+import math
+
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
 
 class Metadata(BaseModel):
     model_config = ConfigDict(
@@ -35,3 +38,14 @@ class BatchInput(BaseModel):
             if len(value) != 32 or any(c not in "0123456789abcdef" for c in value):
                 raise ValueError("Invalid image ID")
         return values
+
+
+def valid_vector(values: list[float]) -> list[float]:
+    if len(values) != 384 or any(
+        type(value) not in (int, float) or not math.isfinite(value) for value in values
+    ):
+        raise ValueError("Expected 384 finite embedding values")
+    norm = math.sqrt(sum(value * value for value in values))
+    if not 0.99 < norm < 1.01:
+        raise ValueError("Embedding must be normalized")
+    return values
