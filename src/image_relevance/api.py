@@ -135,10 +135,10 @@ def create_app(settings: Settings | None = None, *, models=None) -> FastAPI:
 
     @app.post("/posts", status_code=202, tags=["Match an article"], summary="1. Submit an article")
     def add_post(post: PostInput, tenant: Annotated[str, Depends(authenticate)]):
-        saved = service.add_post(tenant, post)
         images = store.rows("SELECT id FROM images WHERE tenant_id=? ORDER BY rowid", (tenant,))
         if len(images) > 200:
             raise ValueError("The article workflow supports a library of up to 200 images")
+        saved = service.add_post(tenant, post)
         job = service.start_batch(tenant, [image["id"] for image in images], [saved["id"]])
         return {
             "post_id": saved["id"],

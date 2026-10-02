@@ -271,7 +271,7 @@ class Service:
                         "explanation": explanation,
                     }
                 )
-        # ponytail: scan all vectors; add a vector index when the corpus outgrows memory.
+
         candidates.sort(
             key=lambda candidate: (
                 candidate["similarity"] if candidate["similarity"] is not None else -2

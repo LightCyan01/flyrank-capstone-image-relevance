@@ -162,6 +162,7 @@ class Worker:
         resource_id = item["image_id"] or item["post_id"]
         row = self.store.get(table, tenant, resource_id)
         status = "ready"
+
         if item["image_id"]:
             metadata = self.describe_image(item, row)
             text = metadata.caption
@@ -169,15 +170,18 @@ class Worker:
                 status = "needs_review"
         else:
             text = row["title"] + "\n" + row["content"]
+
         if not row["vector"] or row["embedding_model"] != self.settings.embedding_model:
             vector = self.call(
                 item, "embedding", self.settings.embedding_model, self.models.embed, text
             )
+
             with self.store.connect() as db:
                 db.execute(
                     f"UPDATE {table} SET vector=?,embedding_model=? WHERE tenant_id=? AND id=?",
                     (json.dumps(vector), self.settings.embedding_model, tenant, resource_id),
                 )
+
         with self.store.connect() as db:
             db.execute(
                 f"UPDATE {table} SET status=? WHERE tenant_id=? AND id=?",
@@ -186,13 +190,17 @@ class Worker:
 
     def finish(self, item: dict, error: Exception | None = None) -> None:
         status, message = "done", None
+
         if error is not None:
             status = "queued"
+
             if isinstance(error, (ValueError, LookupError)) or item["attempts"] >= MAX_ATTEMPTS:
                 status = "failed"
             message = f"Processing failed ({type(error).__name__})"
+
             if isinstance(error, BudgetError):
                 message = str(error)
+
         with self.store.connect() as db:
             db.execute(
                 "UPDATE job_items SET status=?,retry_at=?,error=? WHERE id=?",
@@ -203,6 +211,7 @@ class Worker:
                     item["id"],
                 ),
             )
+
             if status == "failed":
                 table = "images" if item["image_id"] else "posts"
                 db.execute(
@@ -218,6 +227,7 @@ class Worker:
                 "SELECT COUNT(*) FROM job_items WHERE job_id=? AND status IN ('queued','running')",
                 (item["job_id"],),
             ).fetchone()[0]
+
             if not unfinished:
                 failures = db.execute(
                     "SELECT COUNT(*) FROM job_items WHERE job_id=? AND status='failed'",
@@ -227,20 +237,24 @@ class Worker:
                     "UPDATE jobs SET status=? WHERE id=?",
                     ("failed" if failures else "completed", item["job_id"]),
                 )
+
         if status == "failed":
             logger.error("Background item failed; inspect GET /alerts (job=%s)", item["job_id"])
 
     def run(self) -> None:
         while not self.stopping.is_set():
             item = self.claim()
+
             if item is None:
                 self.stopping.wait(0.2)
                 continue
+
             try:
                 if item["attempts"] > MAX_ATTEMPTS:
                     raise ValueError("Interrupted retry limit exceeded")
                 self.process(item)
             except Exception as error:
                 self.finish(item, error)
+
             else:
                 self.finish(item)

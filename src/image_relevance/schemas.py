@@ -27,8 +27,11 @@ class Metadata(BaseModel):
 
 class PostInput(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
-    title: str = Field(min_length=1, max_length=200)
-    content: str = Field(min_length=1, max_length=6000)
+    title: str = Field(min_length=1, max_length=200, examples=["The behavior of red foxes"])
+    content: str = Field(
+        min_length=1, max_length=6000,
+        examples=["Red foxes hunt small mammals and adapt to many habitats."],
+    )
 
 
 class BatchInput(BaseModel):

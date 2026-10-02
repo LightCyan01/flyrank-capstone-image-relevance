@@ -51,8 +51,10 @@ def guard(
     expected = subjects(post_text)
     detected = subjects(metadata.subject)
     reasons = []
+
     if len(expected) != 1:
         reasons.append("Article has no single supported animal subject; manual selection required")
+
     elif detected != expected or metadata.category != "animal":
         reasons.append(
             f"Animal category mismatch: expected {', '.join(sorted(expected))}, "
@@ -64,8 +66,11 @@ def guard(
         and metadata.subject.casefold().replace("_", " ").replace("-", " ") != "red fox"
     ):
         reasons.append(f"Animal species mismatch: expected red fox, detected {metadata.subject}")
+
     if metadata.confidence < confidence:
         reasons.append(f"Low vision confidence {metadata.confidence:.3f} < {confidence:.3f}")
+
     if similarity < threshold:
         reasons.append(f"Similarity below threshold: {similarity:.3f} < {threshold:.3f}")
+
     return reasons
