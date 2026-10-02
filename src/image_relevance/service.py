@@ -4,16 +4,19 @@ import uuid
 from pathlib import Path
 
 from image_relevance.config import Settings
+from image_relevance.matching import cosine, guard
 from image_relevance.models import atomic_write, read_image
-from image_relevance.schemas import BatchInput, PostInput
+from image_relevance.schemas import BatchInput, Metadata, PostInput, valid_vector
 from image_relevance.store import Store
 
 
 class ConflictError(ValueError):
     pass
 
+
 def digest(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()
+
 
 def public_image(row: dict) -> dict:
     fields = (
@@ -28,6 +31,7 @@ def public_image(row: dict) -> dict:
     result = {key: row[key] for key in fields}
     result["metadata"] = json.loads(row["metadata"]) if row["metadata"] else None
     return result
+
 
 class Service:
     def __init__(self, store: Store, settings: Settings):
@@ -138,7 +142,8 @@ class Service:
         items = self.store.rows(
             "SELECT item.image_id,item.post_id,image.filename,post.title,"
             "item.status,item.attempts,item.error FROM job_items AS item "
-            "LEFT JOIN images AS image ON image.id=item.image_id AND image.tenant_id=item.tenant_id "
+            "LEFT JOIN images AS image ON image.id=item.image_id "
+            "AND image.tenant_id=item.tenant_id "
             "LEFT JOIN posts AS post ON post.id=item.post_id AND post.tenant_id=item.tenant_id "
             "WHERE item.tenant_id=? "
             "AND item.job_id=? ORDER BY item.id",
@@ -159,8 +164,10 @@ class Service:
     ) -> dict:
         batch = BatchInput(image_ids=sorted(set(image_ids)), post_ids=sorted(set(post_ids or [])))
         version = [
-            batch.model_dump(), self.settings.vision_model,
-            self.settings.caption_model, self.settings.embedding_model,
+            batch.model_dump(),
+            self.settings.vision_model,
+            self.settings.caption_model,
+            self.settings.embedding_model,
         ]
         request_key = digest(json.dumps(version).encode())
         return self.enqueue(tenant, request_key, batch, retry_failed=True)
@@ -184,4 +191,104 @@ class Service:
             "totals": totals,
             "calls": calls,
             "daily_call_limit": self.settings.daily_call_limit,
+        }
+
+    def rank(self, tenant: str, post_id: str, image_id: str | None = None) -> dict:
+        post = self.store.get("posts", tenant, post_id)
+        if post["status"] != "ready" or not post["vector"]:
+            raise ConflictError("Article is not ready; check its processing job")
+        if post["embedding_model"] != self.settings.embedding_model:
+            raise ConflictError("Embedding model changed; submit this article again")
+        post_vector = valid_vector(json.loads(post["vector"]))
+        if image_id:
+            images = [self.store.get("images", tenant, image_id)]
+        else:
+            images = self.store.rows(
+                "SELECT * FROM images WHERE tenant_id=? ORDER BY rowid", (tenant,)
+            )
+        candidates = []
+        with self.store.connect() as db:
+            for image in images:
+                if not image["metadata"] or not image["vector"]:
+                    candidates.append(
+                        {
+                            "image_id": image["id"],
+                            "filename": image["filename"],
+                            "allowed": False,
+                            "similarity": None,
+                            "explanation": ["Image is not ready; process it in an image batch"],
+                        }
+                    )
+                    continue
+                metadata = Metadata.model_validate_json(image["metadata"])
+                score = cosine(post_vector, valid_vector(json.loads(image["vector"])))
+                reasons = guard(
+                    post["title"] + "\n" + post["content"],
+                    metadata,
+                    score,
+                    self.settings.min_confidence,
+                    self.settings.min_similarity,
+                )
+                if image["status"] not in {"ready", "needs_review"}:
+                    reasons.append("Image processing is incomplete or failed; check its job")
+                for column, current in (
+                    ("vision_model", self.settings.vision_model),
+                    ("caption_model", self.settings.caption_model),
+                    ("embedding_model", self.settings.embedding_model),
+                ):
+                    if image[column] != current:
+                        reasons.append(f"{column.replace('_', ' ')} changed; reprocess this image")
+                explanation = reasons or [
+                    f"Subject agrees ({metadata.subject}); similarity {score:.3f} and "
+                    f"vision confidence {metadata.confidence:.3f} clear both thresholds"
+                ]
+                row = db.execute(
+                    "INSERT INTO suggestions(id,tenant_id,post_id,image_id,similarity,allowed,"
+                    "explanation) VALUES(?,?,?,?,?,?,?) ON CONFLICT(tenant_id,post_id,image_id) "
+                    "DO UPDATE SET similarity=excluded.similarity,allowed=excluded.allowed,"
+                    "explanation=excluded.explanation RETURNING id",
+                    (
+                        uuid.uuid4().hex,
+                        tenant,
+                        post_id,
+                        image["id"],
+                        score,
+                        int(not reasons),
+                        json.dumps(explanation),
+                    ),
+                ).fetchone()
+                candidates.append(
+                    {
+                        "suggestion_id": row["id"],
+                        "image_id": image["id"],
+                        "filename": image["filename"],
+                        "caption": metadata.caption,
+                        "attributes": metadata.attributes,
+                        "subject": metadata.subject,
+                        "similarity": round(score, 6),
+                        "confidence": metadata.confidence,
+                        "allowed": not reasons,
+                        "explanation": explanation,
+                    }
+                )
+        # ponytail: scan all vectors; add a vector index when the corpus outgrows memory.
+        candidates.sort(
+            key=lambda candidate: (
+                candidate["similarity"] if candidate["similarity"] is not None else -2
+            ),
+            reverse=True,
+        )
+        suggestions = [candidate for candidate in candidates if candidate["allowed"]]
+        reasons = []
+        if not suggestions:
+            if not candidates:
+                reasons.append("No images are available; upload an image batch first")
+            for candidate in candidates:
+                reasons.extend(candidate["explanation"])
+        return {
+            "post_id": post_id,
+            "status": "suggested" if suggestions else "no_confident_match",
+            "suggestions": suggestions,
+            "candidates": candidates,
+            "reasons": list(dict.fromkeys(reasons)),
         }

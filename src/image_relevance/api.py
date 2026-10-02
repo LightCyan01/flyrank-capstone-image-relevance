@@ -9,7 +9,7 @@ from PIL import Image
 
 from image_relevance.config import Settings
 from image_relevance.models import MAX_IMAGE_BYTES
-from image_relevance.schemas import BatchInput
+from image_relevance.schemas import BatchInput, PostInput
 from image_relevance.service import ConflictError, Service, public_image
 from image_relevance.store import Store
 from image_relevance.worker import Worker
@@ -41,9 +41,15 @@ def create_app(settings: Settings | None = None, *, models=None) -> FastAPI:
             "**3. See captions and tags** with GET /images.\n\n"
             "To try the included photos, run `uv run image-relevance demo`. "
             "Images marked needs_review have low confidence or an unsupported subject."
+            "\n\n**Match an article:** submit its title and text with POST /posts, "
+            "then open the returned results_url for ranked images and rejection reasons."
         ),
         openapi_tags=[
             {"name": "Process images", "description": "Upload, check progress, inspect results."},
+            {
+                "name": "Match an article",
+                "description": "Submit an article, then check its results.",
+            },
             {"name": "Diagnostics", "description": "Per-call costs and processing failures."},
             {"name": "Advanced", "description": "Individual images and explicit batches."},
         ],
@@ -126,6 +132,47 @@ def create_app(settings: Settings | None = None, *, models=None) -> FastAPI:
         offset: Annotated[int, Query(ge=0)] = 0,
     ):
         return service.costs(tenant, limit, offset)
+
+    @app.post("/posts", status_code=202, tags=["Match an article"], summary="1. Submit an article")
+    def add_post(post: PostInput, tenant: Annotated[str, Depends(authenticate)]):
+        saved = service.add_post(tenant, post)
+        images = store.rows("SELECT id FROM images WHERE tenant_id=? ORDER BY rowid", (tenant,))
+        if len(images) > 200:
+            raise ValueError("The article workflow supports a library of up to 200 images")
+        job = service.start_batch(tenant, [image["id"] for image in images], [saved["id"]])
+        return {
+            "post_id": saved["id"],
+            "job_id": job["id"],
+            "status": job["status"],
+            "status_url": f"/jobs/{job['id']}",
+            "results_url": f"/posts/{saved['id']}/images",
+        }
+
+    @app.get("/posts", tags=["Match an article"], summary="Find submitted articles")
+    def posts(
+        tenant: Annotated[str, Depends(authenticate)],
+        limit: Annotated[int, Query(ge=1, le=200)] = 100,
+        offset: Annotated[int, Query(ge=0)] = 0,
+    ):
+        return store.rows(
+            "SELECT id,title,content,status FROM posts WHERE tenant_id=? "
+            "ORDER BY rowid DESC LIMIT ? OFFSET ?",
+            (tenant, limit, offset),
+        )
+
+    @app.get(
+        "/posts/{post_id}/images",
+        tags=["Match an article"],
+        summary="2. See ranked images and reasons",
+    )
+    def rank(post_id: str, tenant: Annotated[str, Depends(authenticate)]):
+        return service.rank(tenant, post_id)
+
+    @app.get(
+        "/posts/{post_id}/images/{image_id}", tags=["Advanced"], summary="Check a specific image"
+    )
+    def candidate(post_id: str, image_id: str, tenant: Annotated[str, Depends(authenticate)]):
+        return service.rank(tenant, post_id, image_id)
 
     @app.get("/alerts", tags=["Diagnostics"])
     def alerts(tenant: Annotated[str, Depends(authenticate)]):
