@@ -25,6 +25,12 @@ class Metadata(BaseModel):
             cleaned.append(value)
         return cleaned
 
+class PostInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    title: str = Field(min_length=1, max_length=200)
+    content: str = Field(min_length=1, max_length=6000)
+
+
 class BatchInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     image_ids: list[str] = Field(min_length=1, max_length=200)

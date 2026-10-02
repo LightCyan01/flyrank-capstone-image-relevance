@@ -37,7 +37,7 @@ class Store:
             return [dict(row) for row in db.execute(query, values)]
 
     def get(self, table: str, tenant: str, resource_id: str) -> dict:
-        if table not in {"images", "jobs"}:
+        if table not in {"images", "posts", "jobs", "suggestions"}:
             raise ValueError("Unknown resource type")
         rows = self.rows(f"SELECT * FROM {table} WHERE tenant_id=? AND id=?", (tenant, resource_id))
         if not rows:
