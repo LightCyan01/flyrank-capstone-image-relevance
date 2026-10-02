@@ -11,6 +11,7 @@ dependencies = [
     "pillow>=11,<13",
     "ultralytics>=8.4.21,<9",
     "transformers>=5.2,<6",
+    "sentence-transformers>=5.2,<6",
     "torch>=2.7,<3",
     "torchvision>=0.22,<1",
     "filelock>=3.20,<4",

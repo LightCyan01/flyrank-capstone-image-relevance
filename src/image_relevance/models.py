@@ -9,7 +9,8 @@ from typing import cast
 from PIL import Image, ImageOps
 
 from image_relevance.config import Settings
-from image_relevance.schemas import Metadata
+from image_relevance.matching import embedding_text, subjects
+from image_relevance.schemas import Metadata, valid_vector
 
 MAX_IMAGE_BYTES = 10 * 1024 * 1024
 MAX_IMAGE_PIXELS = 25_000_000
@@ -57,6 +58,7 @@ class Models:
         self.settings = settings
         self.vision = None
         self.captioner = None
+        self.embedding = None
 
     def classify(self, path: Path) -> Metadata:
         from ultralytics import YOLO
@@ -80,7 +82,7 @@ class Models:
         if result.probs is None:
             raise ValueError("Classification model returned no probabilities")
         label = result.names[result.probs.top1].replace("_", " ")
-        detected = re.search(r"\b(fox|wolf|dog|bear|deer|elk|grizzly)\b", label) is not None
+        detected = bool(subjects(label))
         # ImageNet dog breed names do not contain the word 'dog'.
         imagenet_labels = (
             len(result.names) == 1000 and result.names.get(151, "").lower() == "chihuahua"
@@ -146,3 +148,15 @@ class Models:
         return Metadata.model_validate(
             {**metadata.model_dump(), "caption": caption, "attributes": attributes}
         )
+
+    def embed(self, text: str) -> list[float]:
+        from sentence_transformers import SentenceTransformer
+
+        if self.embedding is None:
+            self.embedding = SentenceTransformer(
+                self.settings.embedding_model,
+                device=self.settings.device,
+                cache_folder=str(self.settings.data_dir / "model-cache"),
+            )
+        vector = self.embedding.encode(embedding_text(text), normalize_embeddings=True)
+        return valid_vector(vector.tolist())

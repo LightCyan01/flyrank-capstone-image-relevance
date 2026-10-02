@@ -3,6 +3,7 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
+
 def load_env(path: Path = Path(".env")) -> None:
     if path.is_file():
         for line in path.read_text(encoding="utf-8").splitlines():
@@ -19,7 +20,9 @@ class Settings:
     device: str = "cpu"
     vision_model: str = "yolo26s-cls.pt"
     caption_model: str = "Salesforce/blip-image-captioning-base"
+    embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
     min_confidence: float = 0.55
+    min_similarity: float = 0.40
     daily_call_limit: int = 500
     api_keys: dict[str, str] = field(default_factory=dict)
     retry_delay: float = 1.0
@@ -32,14 +35,16 @@ class Settings:
             device=os.getenv("IMAGE_RELEVANCE_DEVICE", cls.device),
             vision_model=os.getenv("IMAGE_RELEVANCE_VISION_MODEL", cls.vision_model),
             caption_model=os.getenv("IMAGE_RELEVANCE_CAPTION_MODEL", cls.caption_model),
+            embedding_model=os.getenv("IMAGE_RELEVANCE_EMBEDDING_MODEL", cls.embedding_model),
             min_confidence=float(os.getenv("IMAGE_RELEVANCE_MIN_CONFIDENCE", "0.55")),
+            min_similarity=float(os.getenv("IMAGE_RELEVANCE_MIN_SIMILARITY", "0.40")),
             daily_call_limit=int(os.getenv("IMAGE_RELEVANCE_DAILY_CALL_LIMIT", "500")),
             api_keys=json.loads(os.getenv("IMAGE_RELEVANCE_API_KEYS", "{}")),
         )
 
     def __post_init__(self) -> None:
-        if not 0 <= self.min_confidence <= 1:
-            raise ValueError("Confidence threshold must be between 0 and 1")
+        if not 0 <= self.min_confidence <= 1 or not 0 <= self.min_similarity <= 1:
+            raise ValueError("Confidence and similarity thresholds must be between 0 and 1")
         if self.daily_call_limit < 1 or self.retry_delay < 0:
             raise ValueError("Invalid call budget or retry delay")
         if (
