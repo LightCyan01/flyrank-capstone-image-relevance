@@ -57,6 +57,10 @@ class ReviewInput(BaseModel):
     note: str = Field(default="", max_length=500)
 
 
+class MatchReviewInput(ReviewInput):
+    image_number: int = Field(ge=1, description="image_number beside the chosen suggestion")
+
+
 def valid_vector(values: list[float]) -> list[float]:
     if len(values) != 384 or any(
         type(value) not in (int, float) or not math.isfinite(value) for value in values

@@ -6,7 +6,14 @@ from pathlib import Path
 from image_relevance.config import Settings
 from image_relevance.matching import cosine, guard
 from image_relevance.models import atomic_write, read_image
-from image_relevance.schemas import BatchInput, Metadata, PostInput, ReviewInput, valid_vector
+from image_relevance.schemas import (
+    BatchInput,
+    MatchReviewInput,
+    Metadata,
+    PostInput,
+    ReviewInput,
+    valid_vector,
+)
 from image_relevance.store import Store
 
 
@@ -193,7 +200,77 @@ class Service:
             "daily_call_limit": self.settings.daily_call_limit,
         }
 
-    def rank(self, tenant: str, post_id: str, image_id: str | None = None) -> dict:
+    def start_match(self, tenant: str, post: PostInput, image_ids: list[str]) -> dict:
+        if not image_ids:
+            image_ids = [
+                row["id"]
+                for row in self.store.rows(
+                    "SELECT id FROM images WHERE tenant_id=? ORDER BY rowid", (tenant,)
+                )
+            ]
+        if not image_ids:
+            raise ValueError("Choose at least one image, or run uv run image-relevance demo first")
+        image_ids = sorted(set(image_ids))
+        BatchInput(image_ids=image_ids)
+        post_id = self.add_post(tenant, post)["id"]
+        job = self.start_batch(tenant, image_ids, [post_id])
+        with self.store.connect() as db:
+            db.execute("UPDATE tenants SET latest_match_id=? WHERE id=?", (job["id"], tenant))
+        return {
+            "match_id": job["id"],
+            "status": job["status"],
+            "next_step": "Open step 2: GET /matches/latest. Execute again while processing.",
+            "status_url": f"/matches/{job['id']}",
+        }
+
+    def match_result(self, tenant: str, match_id: str) -> dict:
+        job = self.job(tenant, match_id)
+        posts = [item["post_id"] for item in job["items"] if item["post_id"]]
+        images = [item["image_id"] for item in job["items"] if item["image_id"]]
+        if len(posts) != 1 or not images:
+            raise ValueError("Use a match_id returned by POST /matches")
+        result = {
+            "match_id": match_id,
+            "status": job["status"],
+            "processed": job["completed"],
+            "total": job["total"],
+        }
+        if job["status"] != "completed":
+            result["errors"] = [item["error"] for item in job["items"] if item["error"]]
+            return result
+        ranked = self.rank(tenant, posts[0], image_ids=images)
+        numbers = {image_id: number for number, image_id in enumerate(images, 1)}
+        for candidate in ranked["candidates"]:
+            candidate["image_number"] = numbers[candidate["image_id"]]
+            candidate["image_url"] = f"/images/{candidate['image_id']}/file"
+        result.update(
+            status=ranked["status"],
+            suggestions=ranked["suggestions"][:5],
+            rejected_images=len(ranked["candidates"]) - len(ranked["suggestions"]),
+            reasons=ranked["reasons"],
+        )
+        result["next_step"] = "Review a chosen image in step 3 using match_id and image_number."
+        return result
+
+    def review_match(self, tenant: str, match_id: str, review: MatchReviewInput) -> dict:
+        job = self.job(tenant, match_id)
+        posts = [item["post_id"] for item in job["items"] if item["post_id"]]
+        images = [item["image_id"] for item in job["items"] if item["image_id"]]
+        if job["status"] != "completed" or len(posts) != 1 or review.image_number > len(images):
+            raise ValueError("That image_number is not available; check the match result first")
+        ranked = self.rank(tenant, posts[0], images[review.image_number - 1])
+        if "suggestion_id" not in ranked["candidates"][0]:
+            raise ConflictError("Image is not ready; submit the article again")
+        return self.review(
+            tenant,
+            ranked["candidates"][0]["suggestion_id"],
+            ReviewInput(decision=review.decision, note=review.note),
+        )
+
+    def rank(
+        self, tenant: str, post_id: str, image_id: str | None = None,
+        *, image_ids: list[str] | None = None,
+    ) -> dict:
         post = self.store.get("posts", tenant, post_id)
         if post["status"] != "ready" or not post["vector"]:
             raise ConflictError("Article is not ready; check its processing job")
@@ -202,6 +279,8 @@ class Service:
         post_vector = valid_vector(json.loads(post["vector"]))
         if image_id:
             images = [self.store.get("images", tenant, image_id)]
+        elif image_ids is not None:
+            images = [self.store.get("images", tenant, value) for value in image_ids]
         else:
             images = self.store.rows(
                 "SELECT * FROM images WHERE tenant_id=? ORDER BY rowid", (tenant,)

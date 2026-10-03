@@ -2,14 +2,15 @@ import hmac
 from contextlib import asynccontextmanager
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, File, Header, HTTPException, Query, UploadFile
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from PIL import Image
+from pydantic import BeforeValidator
 
 from image_relevance.config import Settings
 from image_relevance.models import MAX_IMAGE_BYTES
-from image_relevance.schemas import BatchInput, PostInput, ReviewInput
+from image_relevance.schemas import BatchInput, MatchReviewInput, PostInput, ReviewInput
 from image_relevance.service import ConflictError, Service, public_image
 from image_relevance.store import Store
 from image_relevance.worker import Worker
@@ -37,19 +38,18 @@ def create_app(settings: Settings | None = None, *, models=None) -> FastAPI:
         description=(
             "Local YOLO classification and BLIP captions. Click **Authorize** and paste your "
             "token from IMAGE_RELEVANCE_API_KEYS in .env.\n\n"
-            "**1. Upload** photos with POST /batches. **2. Check progress** with GET /jobs. "
-            "**3. See captions and tags** with GET /images.\n\n"
+            "**1. Submit an article** with POST /matches. **2. Check the result** with "
+            "GET /matches/latest. **3. Approve or reject** a suggestion.\n\n"
             "To try the included photos, run `uv run image-relevance demo`. "
             "Images marked needs_review have low confidence or an unsupported subject."
-            "\n\n**Match an article:** submit its title and text with POST /posts, "
-            "then open the returned results_url for ranked images and rejection reasons."
         ),
         openapi_tags=[
-            {"name": "Process images", "description": "Upload, check progress, inspect results."},
             {
                 "name": "Match an article",
-                "description": "Submit an article, then check its results.",
+                "description": "Submit, check the result, then review your chosen image.",
             },
+            {"name": "Process images", "description": "Upload, check progress, inspect results."},
+            {"name": "Library", "description": "Reopen articles and previous matches."},
             {"name": "Diagnostics", "description": "Per-call costs and processing failures."},
             {"name": "Advanced", "description": "Individual images and explicit batches."},
         ],
@@ -83,6 +83,61 @@ def create_app(settings: Settings | None = None, *, models=None) -> FastAPI:
     @app.get("/", include_in_schema=False)
     def home():
         return RedirectResponse("/docs")
+
+    @app.post(
+        "/matches", status_code=202, tags=["Match an article"],
+        summary="1. Submit an article and images",
+        description="Use the example article or enter your own. Continue with step 2 below.",
+    )
+    def start_match(
+        tenant: Annotated[str, Depends(authenticate)],
+        files: Annotated[
+            list[UploadFile],
+            # Swagger sends an empty text part when optional uploads are left blank.
+            BeforeValidator(lambda files: [file for file in files if file != ""]),
+            File(
+                default_factory=list, max_length=200,
+                description="Leave empty to use your library, or choose photos to upload.",
+                json_schema_extra={"items": {"type": "string", "format": "binary"}, "default": []},
+            ),
+        ],
+        title: Annotated[str, Form(min_length=1, max_length=200)] = "The behavior of red foxes",
+        content: Annotated[str, Form(min_length=1, max_length=6000)] = (
+            "Red foxes hunt small mammals and adapt to many habitats. "
+            "This article introduces the wild red fox."
+        ),
+    ):
+        post = PostInput(title=title, content=content)
+        image_ids = []
+        for file in files:
+            raw = file.file.read(MAX_IMAGE_BYTES + 1)
+            image_ids.append(service.add_image(tenant, file.filename or "image", raw)["id"])
+        return service.start_match(tenant, post, image_ids)
+
+    @app.get(
+        "/matches/latest", tags=["Match an article"], summary="2. Check the result",
+        description=(
+            "Execute again while queued or running. Copy match_id and image_number to step 3."
+        ),
+    )
+    def latest_match(tenant: Annotated[str, Depends(authenticate)]):
+        rows = store.rows("SELECT latest_match_id FROM tenants WHERE id=?", (tenant,))
+        if not rows or not rows[0]["latest_match_id"]:
+            raise HTTPException(404, "Submit an article in step 1 first")
+        return service.match_result(tenant, rows[0]["latest_match_id"])
+
+    @app.post(
+        "/matches/{match_id}/review", tags=["Match an article"],
+        summary="3. Approve or reject an image",
+    )
+    def review_match(
+        match_id: str, review: MatchReviewInput, tenant: Annotated[str, Depends(authenticate)]
+    ):
+        return service.review_match(tenant, match_id, review)
+
+    @app.get("/matches/{match_id}", tags=["Library"], summary="Reopen a previous match")
+    def match_result(match_id: str, tenant: Annotated[str, Depends(authenticate)]):
+        return service.match_result(tenant, match_id)
 
     @app.post("/batches", status_code=202, tags=["Process images"], summary="1. Upload photos")
     def batch(
@@ -133,7 +188,7 @@ def create_app(settings: Settings | None = None, *, models=None) -> FastAPI:
     ):
         return service.costs(tenant, limit, offset)
 
-    @app.post("/posts", status_code=202, tags=["Match an article"], summary="1. Submit an article")
+    @app.post("/posts", status_code=202, tags=["Advanced"], summary="Submit an article as JSON")
     def add_post(post: PostInput, tenant: Annotated[str, Depends(authenticate)]):
         images = store.rows("SELECT id FROM images WHERE tenant_id=? ORDER BY rowid", (tenant,))
         if len(images) > 200:
@@ -148,7 +203,7 @@ def create_app(settings: Settings | None = None, *, models=None) -> FastAPI:
             "results_url": f"/posts/{saved['id']}/images",
         }
 
-    @app.get("/posts", tags=["Match an article"], summary="Find submitted articles")
+    @app.get("/posts", tags=["Library"], summary="Find submitted articles")
     def posts(
         tenant: Annotated[str, Depends(authenticate)],
         limit: Annotated[int, Query(ge=1, le=200)] = 100,
@@ -162,8 +217,8 @@ def create_app(settings: Settings | None = None, *, models=None) -> FastAPI:
 
     @app.get(
         "/posts/{post_id}/images",
-        tags=["Match an article"],
-        summary="2. See ranked images and reasons",
+        tags=["Library"],
+        summary="See ranked images and reasons",
     )
     def rank(post_id: str, tenant: Annotated[str, Depends(authenticate)]):
         return service.rank(tenant, post_id)
