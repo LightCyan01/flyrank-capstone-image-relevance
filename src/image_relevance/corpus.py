@@ -1,4 +1,5 @@
 import hashlib
+import io
 import json
 import time
 from pathlib import Path
@@ -6,14 +7,17 @@ from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
 from filelock import Timeout
+from PIL import Image
 
 from image_relevance.config import Settings
 from image_relevance.models import MAX_IMAGE_BYTES, Models, atomic_write, read_image
-from image_relevance.service import Service
+from image_relevance.schemas import PostInput
+from image_relevance.service import Service, digest
 from image_relevance.store import Store
 from image_relevance.worker import Worker
 
-MANIFEST = Path(__file__).resolve().parents[2] / "corpus" / "images.json"
+CORPUS_DIR = Path(__file__).resolve().parents[2] / "corpus"
+MANIFEST = CORPUS_DIR / "images.json"
 
 def load_images() -> list[dict]:
     return json.loads(MANIFEST.read_text(encoding="utf-8"))
@@ -67,11 +71,20 @@ def seed(settings: Settings, tenant: str = "demo", *, models: Models | None = No
         raise ValueError("Tenant must be configured in IMAGE_RELEVANCE_API_KEYS")
     store = Store(settings.data_dir)
     service = Service(store, settings)
-    image_ids = []
+    images = {}
     for entry in load_images():
         path = download_image(entry, settings.data_dir / "corpus")
-        image_ids.append(service.add_image(tenant, path.name, path.read_bytes())["id"])
-    job = service.start_batch(tenant, image_ids)
+        images[entry["key"]] = service.add_image(tenant, path.name, path.read_bytes())["id"]
+    # A blank image checks how the pipeline handles an unsupported subject.
+    stream = io.BytesIO()
+    Image.new("RGB", (256, 256), "gray").save(stream, format="PNG")
+    images["uncertain-01"] = service.add_image(tenant, "uncertain-01.png", stream.getvalue())["id"]
+    posts = {}
+    for post in json.loads((CORPUS_DIR / "posts.json").read_text(encoding="utf-8")):
+        posts[post["key"]] = service.add_post(
+            tenant, PostInput(title=post["title"], content=post["content"])
+        )["id"]
+    job = service.start_batch(tenant, list(images.values()), list(posts.values()))
     worker = Worker(store, settings, models)
     try:
         worker.start()
@@ -84,12 +97,21 @@ def seed(settings: Settings, tenant: str = "demo", *, models: Models | None = No
         while time.monotonic() < deadline:
             job = service.job(tenant, job["id"])
             if job["completed"] != previous_completed:
-                print(f"Tagged {job['completed']}/{job['total']} images", flush=True)
+                print(f"Processed {job['completed']}/{job['total']} items", flush=True)
                 previous_completed = job["completed"]
             if job["status"] == "failed":
                 raise RuntimeError("Batch failed; inspect /jobs and /alerts")
             if job["status"] == "completed":
-                print(json.dumps({"job_id": job["id"], **service.costs(tenant)["totals"]}))
+                mapping = {"images": images, "posts": posts, "job_id": job["id"]}
+                name = digest(tenant.encode())[:16]
+                atomic_write(
+                    settings.data_dir / f"seed-{name}.json",
+                    json.dumps(mapping, indent=2).encode(),
+                )
+                print(json.dumps({
+                    "seeded_images": len(images), "seeded_posts": len(posts),
+                    "status": job["status"], **service.costs(tenant)["totals"],
+                }))
                 return job
             time.sleep(0.2)
         raise TimeoutError("Batch is still pending; progress is saved in the database")

@@ -1,4 +1,5 @@
 import argparse
+import json
 import logging
 import secrets
 from pathlib import Path
@@ -20,7 +21,9 @@ def init() -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Local YOLO image understanding")
-    parser.add_argument("command", nargs="?", default="serve", choices=["serve", "demo", "seed"])
+    parser.add_argument(
+        "command", nargs="?", default="serve", choices=["serve", "demo", "seed", "eval"]
+    )
     parser.add_argument("--tenant", default="demo")
     parser.add_argument("--port", type=int, default=8000)
     args = parser.parse_args()
@@ -40,13 +43,17 @@ def main() -> None:
 
             print("Preparing demo images and local models. The first run downloads model weights.")
             seed(settings, args.tenant)
-        print(f"Open http://127.0.0.1:{args.port}/docs to upload photos and inspect their tags.")
-        print("Authorize with your demo token from IMAGE_RELEVANCE_API_KEYS in .env.")
+        print(f"Open http://127.0.0.1:{args.port}/docs to submit an article and review its images.")
+        print("Authorize with your tenant token from IMAGE_RELEVANCE_API_KEYS in .env.")
         uvicorn.run(create_app(settings), host="127.0.0.1", port=args.port, workers=1)
     elif args.command == "seed":
         from image_relevance.corpus import seed
 
         seed(settings, args.tenant)
+    else:
+        from image_relevance.evaluate import evaluate
+
+        print(json.dumps(evaluate(settings, args.tenant), indent=2))
 
 
 if __name__ == "__main__":

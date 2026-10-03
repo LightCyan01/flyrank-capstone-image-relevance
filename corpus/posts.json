@@ -1,0 +1,20 @@
+[
+  {"key":"fox-behavior","split":"eval","title":"The behavior of red foxes","content":"Red foxes hunt small mammals and adapt to many habitats. This article introduces the wild red fox.","correct_image":"fox-01"},
+  {"key":"fox-taxonomy","split":"eval","title":"Vulpes vulpes","content":"Vulpes vulpes is a widespread wild species. Its adaptable hunting behavior helps it thrive in changing habitats.","correct_image":"fox-01"},
+  {"key":"fox-wild","split":"eval","title":"Wild fox species","content":"The red fox is a resourceful wild hunter with a bushy tail and reddish coat.","correct_image":"fox-01"},
+  {"key":"wolf-pack","split":"eval","title":"The gray wolf pack","content":"Gray wolves cooperate in family packs, communicate through howling, and hunt together.","correct_image":"wolf-01"},
+  {"key":"wolf-taxonomy","split":"eval","title":"Canis lupus","content":"Canis lupus is a social wild predator. Family groups travel and communicate over large territories.","correct_image":"wolf-01"},
+  {"key":"wolf-winter","split":"eval","title":"Wolves in cold climates","content":"The white wolf and gray wolf survive cold weather with dense coats and coordinated pack behavior.","correct_image":"wolf-01"},
+  {"key":"dog-family","split":"eval","title":"A golden retriever family dog","content":"Golden retrievers are friendly domestic dogs that enjoy companionship and daily exercise.","correct_image":"dog-01"},
+  {"key":"dog-care","split":"eval","title":"Caring for your domestic dog","content":"A golden retriever needs exercise, grooming and patient training to live happily with its family.","correct_image":"dog-01"},
+  {"key":"bear-brown","split":"eval","title":"Brown bear behavior","content":"The brown bear searches for food across a wide range of habitats. Ursus arctos is a powerful wild animal.","correct_image":"bear-01"},
+  {"key":"bear-grizzly","split":"eval","title":"Grizzly bears","content":"A grizzly is a brown bear. These bears forage widely and prepare for winter by building energy reserves.","correct_image":"bear-01"},
+  {"key":"deer-elk","split":"eval","title":"Elk and their antlers","content":"Elk are large deer. Their antlers and seasonal behavior make them distinctive grazing mammals.","correct_image":"deer-01"},
+  {"key":"deer-herd","split":"eval","title":"Understanding deer herds","content":"Elk gather in herds and graze on grasses. These deer communicate and move together through open habitats.","correct_image":"deer-01"},
+  {"key":"calibration-fox","split":"calibration","title":"Red fox photograph","content":"A photograph of a red fox, Vulpes vulpes.","correct_image":"fox-01"},
+  {"key":"calibration-wolf","split":"calibration","title":"White wolf photograph","content":"A photograph of a white wolf, Canis lupus.","correct_image":"wolf-01"},
+  {"key":"calibration-dog","split":"calibration","title":"Golden retriever photograph","content":"A photograph of a golden retriever dog.","correct_image":"dog-01"},
+  {"key":"calibration-bear","split":"calibration","title":"Brown bear photograph","content":"A photograph of a brown bear.","correct_image":"bear-01"},
+  {"key":"calibration-deer","split":"calibration","title":"Elk photograph","content":"A photograph of an elk, a large deer.","correct_image":"deer-01"},
+  {"key":"no-match","split":"probe","title":"Sunflower pollination","content":"Sunflowers depend on bees and other insects for pollination. Their bright flowers provide a summer food source.","correct_image":null}
+]
