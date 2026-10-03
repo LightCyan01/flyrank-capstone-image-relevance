@@ -1,0 +1,25 @@
+run: uv run image-relevance serve
+demo: uv run image-relevance demo
+seed: uv run image-relevance seed
+evaluate: uv run image-relevance eval
+base_url: http://127.0.0.1:8000
+auth:
+  scheme: Bearer
+  token_source: .env / IMAGE_RELEVANCE_API_KEYS / demo
+endpoints:
+  health: GET /health
+  submit_match: POST /matches
+  latest_match: GET /matches/latest
+  review_match: POST /matches/{match_id}/review
+  image_file: GET /images/{image_id}/file
+  upload_image: POST /images
+  create_post: POST /posts
+  start_batch: POST /jobs
+  job_progress: GET /jobs/{job_id}
+  image_metadata: GET /images/{image_id}
+  suggestions: GET /posts/{post_id}/images
+  forced_candidate: GET /posts/{post_id}/images/{image_id}
+  inspect_pairing: GET /suggestions/{suggestion_id}
+  review: POST /suggestions/{suggestion_id}/review
+  costs: GET /costs
+  failure_alerts: GET /alerts
