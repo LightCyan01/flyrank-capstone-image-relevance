@@ -6,7 +6,7 @@ from pathlib import Path
 from image_relevance.config import Settings
 from image_relevance.matching import cosine, guard
 from image_relevance.models import atomic_write, read_image
-from image_relevance.schemas import BatchInput, Metadata, PostInput, valid_vector
+from image_relevance.schemas import BatchInput, Metadata, PostInput, ReviewInput, valid_vector
 from image_relevance.store import Store
 
 
@@ -246,7 +246,7 @@ class Service:
                     "INSERT INTO suggestions(id,tenant_id,post_id,image_id,similarity,allowed,"
                     "explanation) VALUES(?,?,?,?,?,?,?) ON CONFLICT(tenant_id,post_id,image_id) "
                     "DO UPDATE SET similarity=excluded.similarity,allowed=excluded.allowed,"
-                    "explanation=excluded.explanation RETURNING id",
+                    "explanation=excluded.explanation RETURNING id,decision",
                     (
                         uuid.uuid4().hex,
                         tenant,
@@ -260,6 +260,7 @@ class Service:
                 candidates.append(
                     {
                         "suggestion_id": row["id"],
+                        "decision": row["decision"],
                         "image_id": image["id"],
                         "filename": image["filename"],
                         "caption": metadata.caption,
@@ -278,13 +279,19 @@ class Service:
             ),
             reverse=True,
         )
-        suggestions = [candidate for candidate in candidates if candidate["allowed"]]
+        suggestions = [
+            candidate for candidate in candidates
+            if candidate["allowed"] and candidate["decision"] != "rejected"
+        ]
         reasons = []
         if not suggestions:
             if not candidates:
                 reasons.append("No images are available; upload an image batch first")
             for candidate in candidates:
-                reasons.extend(candidate["explanation"])
+                if candidate.get("decision") == "rejected":
+                    reasons.append(f"Reviewer rejected {candidate['filename']}")
+                elif not candidate["allowed"]:
+                    reasons.extend(candidate["explanation"])
         return {
             "post_id": post_id,
             "status": "suggested" if suggestions else "no_confident_match",
@@ -292,3 +299,24 @@ class Service:
             "candidates": candidates,
             "reasons": list(dict.fromkeys(reasons)),
         }
+
+    def suggestion(self, tenant: str, suggestion_id: str) -> dict:
+        row = self.store.get("suggestions", tenant, suggestion_id)
+        row["explanation"] = json.loads(row["explanation"])
+        row["allowed"] = bool(row["allowed"])
+        return row
+
+    def review(self, tenant: str, suggestion_id: str, review: ReviewInput) -> dict:
+        row = self.store.get("suggestions", tenant, suggestion_id)
+        if review.decision == "approved":
+            # Check current models and thresholds before accepting an earlier suggestion.
+            ranked = self.rank(tenant, row["post_id"], row["image_id"])
+            if not ranked["candidates"][0]["allowed"]:
+                raise ConflictError("Cannot approve a pairing rejected by the mismatch guard")
+        with self.store.connect() as db:
+            db.execute(
+                "UPDATE suggestions SET decision=?,note=?,reviewed_at=CURRENT_TIMESTAMP "
+                "WHERE tenant_id=? AND id=?",
+                (review.decision, review.note, tenant, suggestion_id),
+            )
+        return self.suggestion(tenant, suggestion_id)

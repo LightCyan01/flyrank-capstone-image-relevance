@@ -9,7 +9,7 @@ from PIL import Image
 
 from image_relevance.config import Settings
 from image_relevance.models import MAX_IMAGE_BYTES
-from image_relevance.schemas import BatchInput, PostInput
+from image_relevance.schemas import BatchInput, PostInput, ReviewInput
 from image_relevance.service import ConflictError, Service, public_image
 from image_relevance.store import Store
 from image_relevance.worker import Worker
@@ -179,6 +179,19 @@ def create_app(settings: Settings | None = None, *, models=None) -> FastAPI:
         return store.rows(
             "SELECT * FROM alerts WHERE tenant_id=? ORDER BY id DESC LIMIT 100", (tenant,)
         )
+
+    @app.get("/suggestions/{suggestion_id}", tags=["Advanced"], summary="Inspect a pairing")
+    def suggestion(suggestion_id: str, tenant: Annotated[str, Depends(authenticate)]):
+        return service.suggestion(tenant, suggestion_id)
+
+    @app.post(
+        "/suggestions/{suggestion_id}/review", tags=["Advanced"],
+        summary="Approve or reject a pairing",
+    )
+    def review(
+        suggestion_id: str, review: ReviewInput, tenant: Annotated[str, Depends(authenticate)]
+    ):
+        return service.review(tenant, suggestion_id, review)
 
     @app.get("/health", tags=["Diagnostics"])
     def health():

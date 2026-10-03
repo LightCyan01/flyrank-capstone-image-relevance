@@ -1,4 +1,5 @@
 import math
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -48,6 +49,12 @@ class BatchInput(BaseModel):
             if len(value) != 32 or any(c not in "0123456789abcdef" for c in value):
                 raise ValueError("Invalid resource ID")
         return values
+
+
+class ReviewInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    decision: Literal["approved", "rejected"]
+    note: str = Field(default="", max_length=500)
 
 
 def valid_vector(values: list[float]) -> list[float]:
